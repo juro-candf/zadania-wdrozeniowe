@@ -5,6 +5,7 @@ class PersonIn(BaseModel):
     name: str
     surname: str
     date_of_birth: date
+    swag_level: int
 
     @field_validator("name", "surname")
     @classmethod
@@ -25,6 +26,13 @@ class PersonIn(BaseModel):
     def valid_date_of_birth(cls, v: date) -> date:
         if v > date.today():
             raise ValueError("Date of birth cannot be in the future")
+        return v
+    
+    @field_validator("swag_level")
+    @classmethod
+    def non_negative_swag_level(cls, v: int) -> int:
+        if v < 500:
+            raise ValueError("You must have a swag level of at least 500 to be considered cool.")
         return v
     
 class PersonOut(PersonIn):
