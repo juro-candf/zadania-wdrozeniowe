@@ -50,4 +50,4 @@ async def delete_person(person_id: int, payload: DeleteRequest):
         raise HTTPException(status_code=403, detail="Incorrect password")
     del _db[person_id]
     del _credentials[person_id]
-    return {"Person removed"}
+    return {"detail": "Person removed"}
