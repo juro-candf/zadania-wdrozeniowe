@@ -3,6 +3,11 @@ services:
     image: ghcr.io/juro-candf/zadania-wdrozeniowe-backend:latest
     ports:
       - "8000:8000"
+    volumes:
+      - firstapplicationdata:/app/data
+    environment:
+      - DATABASE_PATH=/app/data/app.db
+
   frontend:
     image: ghcr.io/juro-candf/zadania-wdrozeniowe-frontend:latest
     ports:
@@ -11,3 +16,6 @@ services:
       - API_URL=http://backend:8000
     depends_on:
       - backend
+
+volumes:
+  firstapplicationdata:
