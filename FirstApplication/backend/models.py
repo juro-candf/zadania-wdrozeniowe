@@ -43,8 +43,22 @@ class PersonIn(PersonBase):
     @field_validator("password")
     @classmethod
     def password_min_length(cls, v: str) -> str:
-        if len(v) < 4:
-            raise ValueError("Password must be at least 4 characters long.")
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long.")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def password_has_letter(cls, v: str) -> str:
+        if not any(char.isalpha() for char in v):
+            raise ValueError("Password must contain at least one letter.")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def password_has_digit(cls, v: str) -> str:
+        if not any(char.isdigit() for char in v):
+            raise ValueError("Password must contain at least one number.")
         return v
 
 class PersonOut(PersonBase):

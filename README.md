@@ -32,12 +32,13 @@ This project is a deployment ("wdrożeniowe") exercise. The application itself i
 | Requirement | Implementation |
 |---|---|
 | **REST API (FastAPI)** | [backend/main.py](FirstApplication/backend/main.py) — `POST/GET/DELETE /people` endpoints, async handlers, auto-generated OpenAPI/Swagger docs |
-| **Data validation (Pydantic)** | [backend/models.py](FirstApplication/backend/models.py) — `PersonIn`/`PersonOut`/`DeleteRequest`, field validators (non-empty names, no digits, birth date not in the future, swag level range, min password length), automatic `422` on invalid input |
-| **HTTP methods + status codes** | `POST /people` (201/422), `GET /people`, `GET /people/{id}` (404 if missing), `DELETE /people/{id}` (403 on wrong password, 404 if missing) |
+| **Data validation (Pydantic)** | [backend/models.py](FirstApplication/backend/models.py) — `PersonIn`/`PersonOut`/`DeleteRequest`, field validators (non-empty names, no digits, birth date not in the future, swag level range, min password length, password must contain a letter and a number), automatic `422` on invalid input |
+| **HTTP methods + status codes** | `POST /people` (200/422), `GET /people`, `GET /people/{id}` (404 if missing), `DELETE /people/{id}` (403 on wrong password, 404 if missing) |
 | **Frontend UI** | [frontend/frontend.py](FirstApplication/frontend/frontend.py) — Streamlit form + table, talks to the backend only via REST (`API_URL`) |
 | **Password handling** | Passwords are hashed with PBKDF2-HMAC-SHA256 + per-user salt in [backend/main.py](FirstApplication/backend/main.py); the plain password is never stored or returned |
-| **Containerization (Docker)** | Independent [backend/Dockerfile](FirstApplication/backend/Dockerfile) and [frontend/Dockerfile](FirstApplication/frontend/Dockerfile), orchestrated by [docker-compose.yml](FirstApplication/docker-compose.yml) |
-| **Configuration via environment variables** | `API_URL` env var wires the frontend to the backend (see [Environment variables](#environment-variables)) |
+| **Persistent storage (SQLite)** | [backend/main.py](FirstApplication/backend/main.py) — a SQLite database created on startup at `DATABASE_PATH`, persisted outside the container via a named Docker volume |
+| **Containerization (Docker)** | Independent multi-stage [backend/Dockerfile](FirstApplication/backend/Dockerfile) and [frontend/Dockerfile](FirstApplication/frontend/Dockerfile), orchestrated by [docker-compose.yml](FirstApplication/docker-compose.yml) |
+| **Configuration via environment variables** | `API_URL` and `DATABASE_PATH` env vars (see [Environment variables](#environment-variables)) |
 | **Image publishing** | Images are built and pushed to a private container registry (build/publish steps intentionally not documented here) |
 | **Image versioning** | SemVer tags (`vMAJOR.MINOR.PATCH`) + `latest` (see [Image versioning policy](#image-versioning-policy)) |
 
@@ -51,10 +52,10 @@ The application is made of two independent services, run as separate containers 
 graph LR
     U[User / browser] --> F[frontend<br/>Streamlit :8501]
     F -- HTTP / REST --> B[backend<br/>FastAPI :8000]
-    B --> D[(in-process memory store)]
+    B --> D[(SQLite database)]
 ```
 
-- **backend** ([FirstApplication/backend](FirstApplication/backend)) — stores people's data in process memory (a plain Python dict). There is no persistent database, so data is lost on container restart.
+- **backend** ([FirstApplication/backend](FirstApplication/backend)) — stores people's data in a SQLite database at `DATABASE_PATH` (created automatically on startup). In [docker-compose.yml](FirstApplication/docker-compose.yml) this path lives on a named volume, so data survives container restarts.
 - **frontend** ([FirstApplication/frontend](FirstApplication/frontend)) — Streamlit UI, communicates with the backend exclusively through the REST API.
 
 ---
@@ -65,6 +66,7 @@ graph LR
 |---|---|---|
 | Backend HTTP | **FastAPI** + **Uvicorn** | [backend/main.py](FirstApplication/backend/main.py) |
 | Validation | **Pydantic** | [backend/models.py](FirstApplication/backend/models.py) |
+| Storage | **SQLite** (stdlib `sqlite3`) | [backend/main.py](FirstApplication/backend/main.py) |
 | Frontend | **Streamlit** + **requests** | [frontend/frontend.py](FirstApplication/frontend/frontend.py) |
 | Containerization | **Docker** + **Docker Compose** | [backend/Dockerfile](FirstApplication/backend/Dockerfile), [frontend/Dockerfile](FirstApplication/frontend/Dockerfile), [docker-compose.yml](FirstApplication/docker-compose.yml) |
 
@@ -97,8 +99,9 @@ graph LR
 | Variable | Service | Default | Description |
 |---|---|---|---|
 | `API_URL` | frontend | `http://127.0.0.1:8000` | Backend address the frontend sends HTTP requests to. Set to `http://backend:8000` in [docker-compose.yml](FirstApplication/docker-compose.yml) so the frontend can reach the backend by its service name on the Docker network. |
+| `DATABASE_PATH` | backend | `data/app.db` | Path to the SQLite database file. The parent directory is created automatically on startup. Set to `/app/data/app.db` in [docker-compose.yml](FirstApplication/docker-compose.yml), backed by the `firstapplicationdata` named volume so data survives container restarts. |
 
-The backend currently requires no environment variables — its host and port are set directly in [backend/Dockerfile](FirstApplication/backend/Dockerfile) (`uvicorn main:app --host 0.0.0.0 --port 8000`).
+The backend's host and port are set directly in [backend/Dockerfile](FirstApplication/backend/Dockerfile) (`uvicorn main:app --host 0.0.0.0 --port 8000`).
 
 ---
 
@@ -126,13 +129,15 @@ $env:API_URL = "http://127.0.0.1:8000"
 streamlit run frontend.py
 ```
 
+The backend creates its SQLite database at `data/app.db` (relative to the working directory) by default. Set `DATABASE_PATH` before starting the backend to use a different location, e.g. `$env:DATABASE_PATH = "C:\path\to\app.db"`.
+
 ---
 
 ## Docker / Docker Compose
 
-[docker-compose.yml](FirstApplication/docker-compose.yml) defines two services, `backend` and `frontend`, pulling pre-built images from a private container registry and exposing ports `8000` and `8501`. The frontend gets `API_URL=http://backend:8000` so it can reach the backend by service name on the Compose network.
+[docker-compose.yml](FirstApplication/docker-compose.yml) defines two services, `backend` and `frontend`, pulling pre-built images from a private container registry (`ghcr.io/juro-candf/zadania-wdrozeniowe-*`) and exposing ports `8000` and `8501`. The frontend gets `API_URL=http://backend:8000` so it can reach the backend by service name on the Compose network. The backend gets `DATABASE_PATH=/app/data/app.db`, and `/app/data` is backed by the `firstapplicationdata` named volume so the SQLite database survives container restarts and recreations.
 
-Each service has its own single-stage [Dockerfile](FirstApplication/backend/Dockerfile) based on `python:3.13-slim`, which installs dependencies from `requirements.txt` and then copies the application source.
+Each service has its own multi-stage [Dockerfile](FirstApplication/backend/Dockerfile) based on `dhi.io/python:3.13-debian13-dev`: a `builder` stage creates a virtualenv and installs dependencies from `requirements.txt` with `--require-hashes` (pinned via `pip-compile`), then the final stage copies the venv and application source and runs the app from it.
 
 Build and publish steps (registry path, credentials) are intentionally not documented in this README.
 
@@ -162,7 +167,7 @@ Coverage includes:
 
 - **CRUD happy paths** — creating, retrieving, listing, and deleting a person
 - **Error responses** — `404` for a missing person (on both `GET` and `DELETE`), `403` for a wrong delete password, `422` for an invalid path parameter type and missing required fields
-- **Every `PersonIn` validator** — empty or digit-containing name/surname, a future date of birth, swag level range including boundary values (`500`/`100000` valid, `499`/`100001` invalid), minimum password length, invalid date format
+- **Every `PersonIn` validator** — empty or digit-containing name/surname, a future date of birth, swag level range including boundary values (`500`/`100000` valid, `499`/`100001` invalid), minimum password length (8 characters), password must contain at least one letter and one number, invalid date format
 - **Behavioral checks** — correct `age` calculation, IDs increasing across creates, a deleted person disappearing from `GET /people` while others remain, passwords never leaking in single-person or list responses
 
 Dev-only dependencies (`pytest`, `httpx`) are tracked separately from production dependencies in [backend/requirements-dev.in](FirstApplication/backend/requirements-dev.in) / [backend/requirements-dev.txt](FirstApplication/backend/requirements-dev.txt), layered on top of [backend/requirements.txt](FirstApplication/backend/requirements.txt) so shared package versions stay in sync with production.
@@ -179,11 +184,11 @@ pytest FirstApplication/backend/test_main.py -v
 1. **Backend via Swagger UI** — after starting the app, open http://localhost:8000/docs and try out the endpoints (`POST /people`, `GET /people`, `GET /people/{id}`, `DELETE /people/{id}`).
 2. **Backend via curl**, e.g.:
    ```powershell
-   curl -X POST http://localhost:8000/people -H "Content-Type: application/json" -d '{"name":"John","surname":"Smith","date_of_birth":"2000-01-01","swag_level":1000,"password":"pass123"}'
+   curl -X POST http://localhost:8000/people -H "Content-Type: application/json" -d '{"name":"John","surname":"Smith","date_of_birth":"2000-01-01","swag_level":1000,"password":"pass1234"}'
    curl http://localhost:8000/people
    ```
 3. **Frontend end-to-end** — open http://localhost:8501, add a person through the form, verify they appear on the list, then remove them using the password set at registration.
-4. **Data validation** — verify the backend rejects invalid data (e.g. `swag_level` below 500, a future date of birth, a password shorter than 4 characters) with a `422` status code.
+4. **Data validation** — verify the backend rejects invalid data (e.g. `swag_level` below 500, a future date of birth, a password shorter than 8 characters or missing a letter/number) with a `422` status code.
 
 ---
 
@@ -191,17 +196,19 @@ pytest FirstApplication/backend/test_main.py -v
 
 ```
 FirstApplication/
-├── docker-compose.yml       # backend + frontend services, ports, API_URL
+├── docker-compose.yml       # backend + frontend services, ports, API_URL, DATABASE_PATH, data volume
 ├── backend/
-│   ├── Dockerfile           # FastAPI + Uvicorn image
-│   ├── main.py              # API endpoints, password hashing
+│   ├── Dockerfile           # multi-stage FastAPI + Uvicorn image (dhi.io/python base)
+│   ├── .dockerignore        # excludes tests, dev-only deps, caches from the build context
+│   ├── main.py              # API endpoints, password hashing, SQLite storage
 │   ├── models.py            # Pydantic schemas + validators
 │   ├── test_main.py         # pytest suite (API + validation coverage)
 │   ├── requirements.txt
 │   ├── requirements-dev.in  # dev-only deps (pytest, httpx) on top of requirements.in
 │   └── requirements-dev.txt
 └── frontend/
-    ├── Dockerfile           # Streamlit image
+    ├── Dockerfile           # multi-stage Streamlit image (dhi.io/python base)
+    ├── .dockerignore        # excludes dev-only files, caches from the build context
     ├── frontend.py          # UI: registration form + people table
     └── requirements.txt
 ```

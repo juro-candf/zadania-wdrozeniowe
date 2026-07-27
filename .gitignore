@@ -28,6 +28,11 @@ FirstApplication/.venv/
 .DS_Store
 Thumbs.db
 
+# Local SQLite database (backend DATABASE_PATH, defaults to data/app.db)
+*.db
+*.sqlite
+*.sqlite3
+data/
 
 # Testing / coverage
 .pytest_cache/
