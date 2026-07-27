@@ -154,7 +154,27 @@ The image version tag should match a corresponding tag/release in the Git reposi
 
 ## Testing
 
-The project currently has no automated test suite — verification is done manually:
+### Automated tests (backend)
+
+The backend has an automated pytest suite in [backend/test_main.py](FirstApplication/backend/test_main.py), driving the API through FastAPI's `TestClient` against an isolated, temporary SQLite database (so tests never touch real data).
+
+Coverage includes:
+
+- **CRUD happy paths** — creating, retrieving, listing, and deleting a person
+- **Error responses** — `404` for a missing person (on both `GET` and `DELETE`), `403` for a wrong delete password, `422` for an invalid path parameter type and missing required fields
+- **Every `PersonIn` validator** — empty or digit-containing name/surname, a future date of birth, swag level range including boundary values (`500`/`100000` valid, `499`/`100001` invalid), minimum password length, invalid date format
+- **Behavioral checks** — correct `age` calculation, IDs increasing across creates, a deleted person disappearing from `GET /people` while others remain, passwords never leaking in single-person or list responses
+
+Dev-only dependencies (`pytest`, `httpx`) are tracked separately from production dependencies in [backend/requirements-dev.in](FirstApplication/backend/requirements-dev.in) / [backend/requirements-dev.txt](FirstApplication/backend/requirements-dev.txt), layered on top of [backend/requirements.txt](FirstApplication/backend/requirements.txt) so shared package versions stay in sync with production.
+
+Install and run the suite with:
+
+```powershell
+pip install -r FirstApplication/backend/requirements-dev.txt
+pytest FirstApplication/backend/test_main.py -v
+```
+
+### Manual verification
 
 1. **Backend via Swagger UI** — after starting the app, open http://localhost:8000/docs and try out the endpoints (`POST /people`, `GET /people`, `GET /people/{id}`, `DELETE /people/{id}`).
 2. **Backend via curl**, e.g.:
@@ -176,7 +196,10 @@ FirstApplication/
 │   ├── Dockerfile           # FastAPI + Uvicorn image
 │   ├── main.py              # API endpoints, password hashing
 │   ├── models.py            # Pydantic schemas + validators
-│   └── requirements.txt
+│   ├── test_main.py         # pytest suite (API + validation coverage)
+│   ├── requirements.txt
+│   ├── requirements-dev.in  # dev-only deps (pytest, httpx) on top of requirements.in
+│   └── requirements-dev.txt
 └── frontend/
     ├── Dockerfile           # Streamlit image
     ├── frontend.py          # UI: registration form + people table
