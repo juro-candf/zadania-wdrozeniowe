@@ -23,7 +23,7 @@ def make_person_payload(**overrides):
         "surname": "Pane",
         "date_of_birth": "2004-02-22",
         "swag_level": 900,
-        "password": "0987",
+        "password": "0987poiu",
     }
     payload.update(overrides)
     return payload
@@ -75,7 +75,7 @@ def test_delete_person(client):
     created = client.post("/people", json=make_person_payload()).json()
 
     response = client.request(
-        "DELETE", f"/people/{created['id']}", json={"password": "0987"}
+        "DELETE", f"/people/{created['id']}", json={"password": "0987poiu"}
     )
     assert response.status_code == 200
 
@@ -114,6 +114,15 @@ def test_create_person_missing_field(client):
 def test_create_person_password_too_short(client):
     response = client.post("/people", json=make_person_payload(password="abc"))
     assert response.status_code == 422
+
+@pytest.mark.parametrize("password", ["1234567", ""])
+def test_create_person_password_below_boundary(client, password):
+    response = client.post("/people", json=make_person_payload(password=password))
+    assert response.status_code == 422
+
+def test_create_person_password_boundary_valid(client):
+    response = client.post("/people", json=make_person_payload(password="1234567a"))
+    assert response.status_code == 200
 
 @pytest.mark.parametrize("swag_level", [10, 200000])
 def test_create_person_invalid_swag_level(client, swag_level):
@@ -175,7 +184,7 @@ def test_deleted_person_removed_from_list_others_remain(client):
     keep = client.post("/people", json=make_person_payload(name="Keeper")).json()
     remove = client.post("/people", json=make_person_payload(name="Removed")).json()
 
-    client.request("DELETE", f"/people/{remove['id']}", json={"password": "0987"})
+    client.request("DELETE", f"/people/{remove['id']}", json={"password": "0987poiu"})
 
     names = [p["name"] for p in client.get("/people").json()]
     assert "Removed" not in names
@@ -195,3 +204,19 @@ def test_list_people_no_password_leak(client):
     client.post("/people", json=make_person_payload(name="Secretive"))
     response = client.get("/people")
     assert all("password" not in person for person in response.json())
+
+def test_create_person_password_no_digit(client):
+    response = client.post("/people", json=make_person_payload(password="alletters"))
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert any("at least one number" in error["msg"] for error in detail)
+
+def test_create_person_password_no_letter(client):
+    response = client.post("/people", json=make_person_payload(password="12345678"))
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert any("at least one letter" in error["msg"] for error in detail)
+
+def test_create_person_password_letters_and_digits_valid(client):
+    response = client.post("/people", json=make_person_payload(password="abcd1234"))
+    assert response.status_code == 200
