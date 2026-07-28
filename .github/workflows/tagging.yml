@@ -57,4 +57,5 @@ jobs:
               with:
                 tag_name: '${{steps.bump.outputs.version}}'
                 name: 'Release ${{steps.bump.outputs.version}}'
-                body: 'Description of the changes in this release'
+                body: 'Description of the changes in this release:'
+                generate_release_notes: true
