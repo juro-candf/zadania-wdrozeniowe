@@ -1,0 +1,40 @@
+name: Auto Tests
+
+on:
+    push:
+        branches: ["**"]
+    pull_request:
+        branches: ["**"]
+    workflow_dispatch:
+
+jobs:
+    tests:
+        name: Auto Tests (Python 3.14)
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v7
+
+            - name: Set up Python 3.14
+              uses: actions/setup-python@v7
+              with:
+                python-version: "3.14"   
+                cache: pip
+                
+            - name: Install dependencies
+              working-directory: FirstApplication/backend
+              run: |
+                pip install -r requirements.txt
+                pip install -r requirements-dev.txt
+
+            - name: Run tests
+              working-directory: FirstApplication/backend
+              run: |
+                pytest test_main.py -v --tb=short --junit-xml=pytest_results.xml
+            
+            - name: Test results
+              if: always()
+              run: |
+                echo "Test results:"
+                cat FirstApplication/backend/pytest_results.xml
