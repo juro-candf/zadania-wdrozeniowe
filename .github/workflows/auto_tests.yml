@@ -9,17 +9,17 @@ on:
 
 jobs:
     tests:
-        name: Auto Tests (Python 3.14)
+        name: Auto Tests (Python 3.13)
         runs-on: ubuntu-latest
 
         steps:
             - name: Checkout repository
               uses: actions/checkout@v7
 
-            - name: Set up Python 3.14
+            - name: Set up Python 3.13
               uses: actions/setup-python@v7
               with:
-                python-version: "3.14"   
+                python-version: "3.13"
                 cache: pip
                 
             - name: Install dependencies

@@ -17,7 +17,8 @@ A small two-service web app (FastAPI backend + Streamlit frontend) used to pract
 9. [Docker / Docker Compose](#docker--docker-compose)
 10. [Image versioning policy](#image-versioning-policy)
 11. [Testing](#testing)
-12. [Repository structure](#repository-structure)
+12. [Continuous integration](#continuous-integration)
+13. [Repository structure](#repository-structure)
 
 ---
 
@@ -41,6 +42,8 @@ This project is a deployment ("wdrożeniowe") exercise. The application itself i
 | **Configuration via environment variables** | `API_URL` and `DATABASE_PATH` env vars (see [Environment variables](#environment-variables)) |
 | **Image publishing** | Images are built and pushed to a private container registry (build/publish steps intentionally not documented here) |
 | **Image versioning** | SemVer tags (`vMAJOR.MINOR.PATCH`) + `latest` (see [Image versioning policy](#image-versioning-policy)) |
+| **Automated testing (CI)** | [.github/workflows/auto_tests.yml](.github/workflows/auto_tests.yml) — runs the pytest suite on every push/PR (see [Continuous integration](#continuous-integration)) |
+| **Automated versioning/releases (CI)** | [.github/workflows/tagging.yml](.github/workflows/tagging.yml) — commit-message-driven SemVer tag + GitHub release on every push to `main` |
 
 ---
 
@@ -145,15 +148,16 @@ Build and publish steps (registry path, credentials) are intentionally not docum
 
 ## Image versioning policy
 
-Images are tagged following [Semantic Versioning](https://semver.org/), in the format `vMAJOR.MINOR.PATCH`:
+Images are tagged following [Semantic Versioning](https://semver.org/), in the format `vMAJOR.MINOR.PATCH`. The version bump is fully automated by the **Auto Tagging** workflow ([.github/workflows/tagging.yml](.github/workflows/tagging.yml)), which runs on every push to `main` (ignoring commits that only touch `README.md`) and decides the bump from the *commit message prefix*:
 
-- **MAJOR** — breaking changes incompatible with the previous API version (e.g. an endpoint contract change).
-- **MINOR** — new functionality that remains backward compatible.
-- **PATCH** — bug fixes with no functional changes.
+- **`feature/...`** — MAJOR bump (breaking/incompatible changes), resets MINOR and PATCH to `0`.
+- **`fix/...`** — MINOR bump (new, backward-compatible functionality), resets PATCH to `0`.
+- **`hotfix/...`** — PATCH bump (bug fixes, no functional changes).
+- Any other commit message — no tag or release is created.
 
-Each image is published with two tags: a specific version (e.g. `v1.2.0`) and `latest`, pointing to the newest stable version (used by default in [docker-compose.yml](FirstApplication/docker-compose.yml)).
+The workflow reads the latest existing `vMAJOR.MINOR.PATCH` tag, computes the new version, pushes the Git tag, and creates a GitHub Release with auto-generated release notes.
 
-The image version tag should match a corresponding tag/release in the Git repository, to make it easy to trace a given image back to the exact source commit.
+Each image is published with two tags: the specific version (e.g. `v1.2.0`) and `latest`, pointing to the newest stable version (used by default in [docker-compose.yml](FirstApplication/docker-compose.yml)). Because the tag is created directly off the commit that lands on `main`, the image version tag reliably traces back to the exact source commit.
 
 ---
 
@@ -192,9 +196,24 @@ pytest FirstApplication/backend/test_main.py -v
 
 ---
 
+## Continuous integration
+
+Two GitHub Actions workflows in [.github/workflows](.github/workflows) automate testing and releases:
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| **Auto Tests** ([auto_tests.yml](.github/workflows/auto_tests.yml)) | Push or pull request on any branch | Installs [backend/requirements.txt](FirstApplication/backend/requirements.txt) and [backend/requirements-dev.txt](FirstApplication/backend/requirements-dev.txt) on Python 3.13 (matching the Docker images), then runs `pytest` against [backend/test_main.py](FirstApplication/backend/test_main.py) from `FirstApplication/backend`, producing a JUnit XML report that is printed as a final step |
+| **Auto Tagging** ([tagging.yml](.github/workflows/tagging.yml)) | Push to `main` (ignoring README-only commits) | Bumps and pushes a new SemVer Git tag based on the commit message prefix and creates a matching GitHub Release — see [Image versioning policy](#image-versioning-policy) |
+
+---
+
 ## Repository structure
 
 ```
+.github/
+├── workflows/
+│   ├── auto_tests.yml       # runs pytest on push/PR (Python 3.14)
+│   └── tagging.yml          # commit-prefix-driven SemVer tagging + GitHub release
 FirstApplication/
 ├── docker-compose.yml       # backend + frontend services, ports, API_URL, DATABASE_PATH, data volume
 ├── backend/
