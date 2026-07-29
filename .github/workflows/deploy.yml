@@ -21,6 +21,6 @@ jobs:
             - name: Deploy
               working-directory: FirstApplication
               run: |
-                docker-compose pull
-                docker-compose up -d
+                docker compose pull
+                docker compose up -d
             
