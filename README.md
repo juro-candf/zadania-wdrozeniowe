@@ -15,10 +15,11 @@ A small two-service web app (FastAPI backend + Streamlit frontend) used to pract
 7. [Environment variables](#environment-variables)
 8. [Running locally](#running-locally)
 9. [Docker / Docker Compose](#docker--docker-compose)
-10. [Image versioning policy](#image-versioning-policy)
-11. [Testing](#testing)
-12. [Continuous integration](#continuous-integration)
-13. [Repository structure](#repository-structure)
+10. [Deployment workflow](#deployment-workflow)
+11. [Image versioning policy](#image-versioning-policy)
+12. [Testing](#testing)
+13. [Continuous integration](#continuous-integration)
+14. [Repository structure](#repository-structure)
 
 ---
 
@@ -44,6 +45,8 @@ This project is a deployment ("wdrożeniowe") exercise. The application itself i
 | **Image versioning** | SemVer tags (`vMAJOR.MINOR.PATCH`) + `latest` (see [Image versioning policy](#image-versioning-policy)) |
 | **Automated testing (CI)** | [.github/workflows/auto_tests.yml](.github/workflows/auto_tests.yml) — runs the pytest suite on every push/PR (see [Continuous integration](#continuous-integration)) |
 | **Automated versioning/releases (CI)** | [.github/workflows/tagging.yml](.github/workflows/tagging.yml) — commit-message-driven SemVer tag + GitHub release on every push to `main` |
+| **Deployment workflow (CI)** | [.github/workflows/deploy.yml](.github/workflows/deploy.yml) — on every push to `main`, pulls `DATABASE_PATH` from the `dev` GitHub Environment variable and runs `docker compose pull` + `docker compose up -d` |
+| **Configuration via GitHub Environments** | The `dev` [GitHub Environment](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment) holds the `DATABASE_PATH` variable used by [deploy.yml](.github/workflows/deploy.yml) |
 
 ---
 
@@ -102,7 +105,7 @@ graph LR
 | Variable | Service | Default | Description |
 |---|---|---|---|
 | `API_URL` | frontend | `http://127.0.0.1:8000` | Backend address the frontend sends HTTP requests to. Set to `http://backend:8000` in [docker-compose.yml](FirstApplication/docker-compose.yml) so the frontend can reach the backend by its service name on the Docker network. |
-| `DATABASE_PATH` | backend | `data/app.db` | Path to the SQLite database file. The parent directory is created automatically on startup. Set to `/app/data/app.db` in [docker-compose.yml](FirstApplication/docker-compose.yml), backed by the `firstapplicationdata` named volume so data survives container restarts. |
+| `DATABASE_PATH` | backend | None; required by Docker Compose | Path to the SQLite database file. The parent directory is created automatically on startup. [docker-compose.yml](FirstApplication/docker-compose.yml) reads it via `${DATABASE_PATH}` substitution, sourced from a local `FirstApplication/.env` file (git-ignored) for local runs, or from the `dev` GitHub Environment variable of the same name in CI (written to `.env` by [deploy.yml](.github/workflows/deploy.yml)). Either way it resolves to `/app/data/app.db`, backed by the `firstapplicationdata` named volume so data survives container restarts. |
 
 The backend's host and port are set directly in [backend/Dockerfile](FirstApplication/backend/Dockerfile) (`uvicorn main:app --host 0.0.0.0 --port 8000`).
 
@@ -111,6 +114,14 @@ The backend's host and port are set directly in [backend/Dockerfile](FirstApplic
 ## Running locally
 
 ### With Docker Compose
+
+Create a git-ignored `FirstApplication/.env` file so Compose can resolve `${DATABASE_PATH}` (this mirrors the `DATABASE_PATH` variable stored in the `dev` GitHub Environment, used the same way by [deploy.yml](.github/workflows/deploy.yml) in CI):
+
+```
+DATABASE_PATH=/app/data/app.db
+```
+
+Then:
 
 ```powershell
 cd FirstApplication
@@ -143,6 +154,14 @@ The backend creates its SQLite database at `data/app.db` (relative to the workin
 Each service has its own multi-stage [Dockerfile](FirstApplication/backend/Dockerfile) based on `dhi.io/python:3.13-debian13-dev`: a `builder` stage creates a virtualenv and installs dependencies from `requirements.txt` with `--require-hashes` (pinned via `pip-compile`), then the final stage copies the venv and application source and runs the app from it.
 
 Build and publish steps (registry path, credentials) are intentionally not documented in this README.
+
+Pulling these images (locally or in CI) requires authenticating to the registry first, even when a package is public, e.g. `docker login ghcr.io -u <github-username>` with a PAT that has `read:packages` scope — otherwise `docker compose pull` can fail with an `error from registry: denied` response.
+
+## Deployment workflow
+
+[.github/workflows/deploy.yml](.github/workflows/deploy.yml) runs on every push to `main`: it writes `DATABASE_PATH=${{ vars.DATABASE_PATH }}` (from the `dev` GitHub Environment) into `FirstApplication/.env`, then runs `docker compose pull` and `docker compose up -d` from `FirstApplication/`.
+
+The workflow currently uses GitHub-hosted `ubuntu-latest`, so its containers and named volume exist only for the duration of the job and are removed when the runner is discarded. It verifies that the stack can pull and start, but it is not a persistent deployment. To deploy an always-on instance, run the same Compose commands on a self-hosted runner or a remote server over SSH.
 
 ---
 
@@ -198,12 +217,13 @@ pytest FirstApplication/backend/test_main.py -v
 
 ## Continuous integration
 
-Two GitHub Actions workflows in [.github/workflows](.github/workflows) automate testing and releases:
+Three GitHub Actions workflows in [.github/workflows](.github/workflows) automate testing, releases, and deployment:
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| **Auto Tests** ([auto_tests.yml](.github/workflows/auto_tests.yml)) | Push or pull request on any branch | Installs [backend/requirements.txt](FirstApplication/backend/requirements.txt) and [backend/requirements-dev.txt](FirstApplication/backend/requirements-dev.txt) on Python 3.13 (matching the Docker images), then runs `pytest` against [backend/test_main.py](FirstApplication/backend/test_main.py) from `FirstApplication/backend`, producing a JUnit XML report that is printed as a final step |
+| **Auto Tests** ([auto_tests.yml](.github/workflows/auto_tests.yml)) | Push or pull request on any branch | Installs [backend/requirements.txt](FirstApplication/backend/requirements.txt) and [backend/requirements-dev.txt](FirstApplication/backend/requirements-dev.txt) on Python 3.13 (matching the Docker images), then runs `pytest` against [backend/test_main.py](FirstApplication/backend/test_main.py) from `FirstApplication/backend`, producing a JUnit XML report that is printed as a final step. |
 | **Auto Tagging** ([tagging.yml](.github/workflows/tagging.yml)) | Push to `main` (ignoring README-only commits) | Bumps and pushes a new SemVer Git tag based on the commit message prefix and creates a matching GitHub Release — see [Image versioning policy](#image-versioning-policy) |
+| **Deploy** ([deploy.yml](.github/workflows/deploy.yml)) | Push to `main` (ignoring README-only commits) | Runs with `environment: dev`; writes the `DATABASE_PATH` environment variable into `FirstApplication/.env`, then runs `docker compose pull` and `docker compose up -d` to redeploy with the latest published images |
 
 ---
 
@@ -212,10 +232,12 @@ Two GitHub Actions workflows in [.github/workflows](.github/workflows) automate 
 ```
 .github/
 ├── workflows/
-│   ├── auto_tests.yml       # runs pytest on push/PR (Python 3.14)
-│   └── tagging.yml          # commit-prefix-driven SemVer tagging + GitHub release
+│   ├── auto_tests.yml       # runs pytest on push/PR (Python 3.13)
+│   ├── tagging.yml          # commit-prefix-driven SemVer tagging + GitHub release
+│   └── deploy.yml           # pulls DATABASE_PATH from the "dev" environment, docker compose pull + up -d on push to main
 FirstApplication/
 ├── docker-compose.yml       # backend + frontend services, ports, API_URL, DATABASE_PATH, data volume
+├── .env                     # git-ignored; local DATABASE_PATH used by docker compose (mirrors the "dev" environment variable)
 ├── backend/
 │   ├── Dockerfile           # multi-stage FastAPI + Uvicorn image (dhi.io/python base)
 │   ├── .dockerignore        # excludes tests, dev-only deps, caches from the build context
