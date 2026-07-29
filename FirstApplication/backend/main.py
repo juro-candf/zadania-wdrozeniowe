@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from models import PersonIn, PersonOut, DeleteRequest
 
-DATABASE_PATH = Path(os.environ.get("DATABASE_PATH", "data/app.db"))
+DATABASE_PATH = Path(os.environ["DATABASE_PATH"])
 
 def get_connection() -> sqlite3.Connection:
     connection = sqlite3.connect(DATABASE_PATH)
