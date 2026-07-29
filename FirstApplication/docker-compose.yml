@@ -6,7 +6,7 @@ services:
     volumes:
       - firstapplicationdata:/app/data
     environment:
-      - DATABASE_PATH=/app/data/app.db
+      - DATABASE_PATH=${DATABASE_PATH}
 
   frontend:
     image: ghcr.io/juro-candf/zadania-wdrozeniowe-frontend:latest

@@ -1,0 +1,26 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "README.md"
+
+jobs:
+    deploy:
+        runs-on: ubuntu-latest
+        environment: dev
+        steps:
+            - uses: actions/checkout@v7
+            - name: env 4 docker compose
+              working-directory: FirstApplication
+              run: |
+                echo "DATABASE_PATH=${{ vars.DATABASE_PATH }}" >> .env
+
+            - name: Deploy
+              working-directory: FirstApplication
+              run: |
+                docker-compose pull
+                docker-compose up -d
+            
