@@ -1,6 +1,6 @@
 # Cool People List — deployment exercise
 
-A small two-service web app (FastAPI backend + Streamlit frontend) used to practice containerization and image publishing.
+A small two-service web app (FastAPI backend + Streamlit frontend) used to practice containerization and image publishing during an internship.
 
 ---
 
