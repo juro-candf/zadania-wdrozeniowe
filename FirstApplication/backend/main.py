@@ -46,6 +46,10 @@ app = FastAPI(lifespan=lifespan)
 #_credentials: dict[int, tuple[bytes, str]] = {}
 #_next_id = 1
 
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
 def hash_password(password: str, salt: bytes) -> str:
     return hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 100_000).hex()
 
