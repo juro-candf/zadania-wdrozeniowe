@@ -19,6 +19,9 @@ FirstApplication/.venv/
 # Docker
 *.log
 
+# Locally generated nginx TLS certificates
+FirstApplication/nginx/certs/
+
 # IDE / editor
 .vscode/*
 !.vscode/settings.json
