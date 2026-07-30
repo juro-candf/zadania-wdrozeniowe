@@ -17,16 +17,12 @@ updates:
   # Backend Python dependencies
   - package-ecosystem: "pip"
     directory: "/FirstApplication/backend"
-    registries:
-      - dhi-io
     schedule:
       interval: "daily"
 
   # Frontend Python dependencies
   - package-ecosystem: "pip"
     directory: "/FirstApplication/frontend"
-    registries:
-      - dhi-io
     schedule:
       interval: "daily"
 
