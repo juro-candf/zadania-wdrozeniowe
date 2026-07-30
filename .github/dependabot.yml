@@ -4,33 +4,50 @@
 # https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 
 version: 2
+
+registries:
+  dhi-io:
+    type: docker-registry
+    url: https://dhi.io
+    username: ${{secrets.DHI_USERNAME}}
+    password: ${{secrets.DHI_PASSWORD}}
+
+
 updates:
   # Backend Python dependencies
   - package-ecosystem: "pip"
     directory: "/FirstApplication/backend"
+    registries:
+      - dhi-io
     schedule:
-      interval: "weekly"
+      interval: "daily"
 
   # Frontend Python dependencies
   - package-ecosystem: "pip"
     directory: "/FirstApplication/frontend"
+    registries:
+      - dhi-io
     schedule:
-      interval: "weekly"
+      interval: "daily"
 
   # Backend Docker image
   - package-ecosystem: "docker"
     directory: "/FirstApplication/backend"
+    registries:
+      - dhi-io
     schedule:
-      interval: "weekly"
+      interval: "daily"
 
   # Frontend Docker image
   - package-ecosystem: "docker"
     directory: "/FirstApplication/frontend"
+    registries:
+      - dhi-io
     schedule:
-      interval: "weekly"
+      interval: "daily"
 
   # GitHub Actions workflows
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "daily"
