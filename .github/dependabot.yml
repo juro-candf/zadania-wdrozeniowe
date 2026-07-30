@@ -8,7 +8,7 @@ version: 2
 registries:
   dhi-io:
     type: docker-registry
-    url: https://dhi.io
+    url: dhi.io
     username: ${{secrets.DHI_USERNAME}}
     password: ${{secrets.DHI_PASSWORD}}
 
