@@ -10,4 +10,6 @@ COPY --from=builder /opt/venv /opt/venv
 COPY . .
 ENV PATH="/opt/venv/bin:$PATH"
 EXPOSE 8501
+HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
+  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=2)"]
 CMD ["python", "-m", "streamlit", "run", "frontend.py", "--server.address=0.0.0.0", "--server.port=8501"]

@@ -7,6 +7,12 @@ services:
       - firstapplicationdata:/app/data
     environment:
       - DATABASE_PATH=${DATABASE_PATH}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
 
   frontend:
     image: ghcr.io/juro-candf/zadania-wdrozeniowe-frontend:latest
@@ -15,7 +21,14 @@ services:
     environment:
       - API_URL=http://backend:8000
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
 
 volumes:
   firstapplicationdata:
