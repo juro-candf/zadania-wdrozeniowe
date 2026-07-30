@@ -282,7 +282,7 @@ Three GitHub Actions workflows in [.github/workflows](.github/workflows) automat
 | **Auto Tagging** ([tagging.yml](.github/workflows/tagging.yml)) | Push to `main` | Bumps and pushes a new SemVer Git tag based on the commit message prefix and creates a matching GitHub Release — see [Image versioning policy](#image-versioning-policy) |
 | **Deploy** ([deploy.yml](.github/workflows/deploy.yml)) | Push to `main` | Runs with `environment: dev`; writes the `DATABASE_PATH` environment variable into `FirstApplication/.env`, then runs `docker compose pull` and `docker compose up -d` to redeploy with the latest published images; requires nginx TLS files to be provisioned on the runner/host |
 
-Dependency updates are automated by [Dependabot](.github/dependabot.yml), which opens pull requests on a weekly schedule for: the backend's and frontend's `pip` dependencies, the base images referenced by both [Dockerfiles](FirstApplication/backend/Dockerfile), and the GitHub Actions used in the workflows above.
+Dependency updates are automated by [Dependabot](.github/dependabot.yml), which opens pull requests on a daily schedule for: the backend's and frontend's `pip` dependencies, the base images referenced by both [Dockerfiles](FirstApplication/backend/Dockerfile) (authenticated against the `dhi.io` registry via Dependabot secrets), and the GitHub Actions used in the workflows above.
 
 ---
 
@@ -290,7 +290,7 @@ Dependency updates are automated by [Dependabot](.github/dependabot.yml), which 
 
 ```
 .github/
-├── dependabot.yml           # weekly pip/docker/github-actions dependency update PRs
+├── dependabot.yml           # daily pip/docker/github-actions dependency update PRs
 ├── workflows/
 │   ├── auto_tests.yml       # runs pytest on push/PR (Python 3.13)
 │   ├── tagging.yml          # commit-prefix-driven SemVer tagging + GitHub release
