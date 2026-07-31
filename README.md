@@ -279,6 +279,7 @@ Three GitHub Actions workflows in [.github/workflows](.github/workflows) automat
 | Workflow | Trigger | What it does |
 |---|---|---|
 | **Auto Tests** ([auto_tests.yml](.github/workflows/auto_tests.yml)) | Push or pull request on any branch | Installs [backend/requirements.txt](FirstApplication/backend/requirements.txt) and [backend/requirements-dev.txt](FirstApplication/backend/requirements-dev.txt) on Python 3.13 (matching the Docker images), then runs `pytest` against [backend/test_main.py](FirstApplication/backend/test_main.py) from `FirstApplication/backend`, producing a JUnit XML report that is printed as a final step. |
+| **Gitleaks** ([gitleaks.yml](.github/workflows/gitleaks.yml)) | Push or pull request on any branch | Scans the full Git history (`fetch-depth: 0`) with [gitleaks/gitleaks-action](https://github.com/gitleaks/gitleaks-action) to catch committed secrets |
 | **Auto Tagging** ([tagging.yml](.github/workflows/tagging.yml)) | Push to `main` | Bumps and pushes a new SemVer Git tag based on the commit message prefix and creates a matching GitHub Release — see [Image versioning policy](#image-versioning-policy) |
 | **Deploy** ([deploy.yml](.github/workflows/deploy.yml)) | Push to `main` | Runs with `environment: dev`; writes the `DATABASE_PATH` environment variable into `FirstApplication/.env`, then runs `docker compose pull` and `docker compose up -d` to redeploy with the latest published images; requires nginx TLS files to be provisioned on the runner/host |
 
@@ -293,6 +294,7 @@ Dependency updates are automated by [Dependabot](.github/dependabot.yml), which 
 ├── dependabot.yml           # daily pip/docker/github-actions dependency update PRs
 ├── workflows/
 │   ├── auto_tests.yml       # runs pytest on push/PR (Python 3.13)
+│   ├── gitleaks.yml         # secret scanning on push/PR (full history)
 │   ├── tagging.yml          # commit-prefix-driven SemVer tagging + GitHub release
 │   └── deploy.yml           # pulls DATABASE_PATH from the "dev" environment, docker compose pull + up -d on push to main
 FirstApplication/
