@@ -9,16 +9,18 @@ from datetime import date
 from fastapi import FastAPI, HTTPException
 from models import PersonIn, PersonOut, DeleteRequest
 
-DB_CONFIG = {
-    "host": os.environ["POSTGRES_HOST"],
-    "port": os.environ.get("POSTGRES_PORT", "5432"),
-    "dbname": os.environ["POSTGRES_DB"],
-    "user": os.environ["POSTGRES_USER"],
-    "password": os.environ["POSTGRES_PASSWORD"],
-}
+def get_db_config():
+    return {
+        "host": os.environ["POSTGRES_HOST"],
+        "port": os.environ.get("POSTGRES_PORT", "5432"),
+        "dbname": os.environ["POSTGRES_DB"],
+        "user": os.environ["POSTGRES_USER"],
+        "password": os.environ["POSTGRES_PASSWORD"],
+    }
 
 def get_connection():
-    return psycopg2.connect(**DB_CONFIG, cursor_factory=psycopg2.extras.RealDictCursor)
+    connection = psycopg2.connect(**get_db_config(), cursor_factory=psycopg2.extras.RealDictCursor)
+    return connection
 
 
 def create_database() -> None:

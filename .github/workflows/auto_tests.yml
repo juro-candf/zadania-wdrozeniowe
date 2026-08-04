@@ -11,6 +11,20 @@ jobs:
     tests:
         name: Auto Tests (Python 3.13)
         runs-on: ubuntu-latest
+        services:
+          postgres:
+            image: postgres:16
+            env:
+              POSTGRES_USER: testuser
+              POSTGRES_PASSWORD: testpass
+              POSTGRES_DB: test_coolpeople
+            ports:
+              - 5432:5432
+            options: >-
+              --health-cmd="pg_isready -U testuser"
+              --health-interval=5s
+              --health-timeout=5s
+              --health-retries=5
 
         steps:
             - name: Checkout repository
@@ -21,7 +35,7 @@ jobs:
               with:
                 python-version: "3.13"
                 cache: pip
-                
+
             - name: Install dependencies
               working-directory: FirstApplication/backend
               run: |
@@ -30,9 +44,15 @@ jobs:
 
             - name: Run tests
               working-directory: FirstApplication/backend
+              env:
+                POSTGRES_HOST: localhost
+                POSTGRES_PORT: "5432"
+                POSTGRES_DB: test_coolpeople
+                POSTGRES_USER: testuser
+                POSTGRES_PASSWORD: testpass
               run: |
                 pytest test_main.py -v --tb=short --junit-xml=pytest_results.xml
-            
+
             - name: Test results
               if: always()
               run: |
