@@ -2,37 +2,41 @@ import hashlib
 import hmac
 import os
 import secrets
-import sqlite3
+import psycopg2
+import psycopg2.extras
 from contextlib import asynccontextmanager
 from datetime import date
-from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from models import PersonIn, PersonOut, DeleteRequest
 
-DATABASE_PATH = Path(os.environ["DATABASE_PATH"])
+DB_CONFIG = {
+    "host": os.environ["POSTGRES_HOST"],
+    "port": os.environ.get("POSTGRES_PORT", "5432"),
+    "dbname": os.environ["POSTGRES_DB"],
+    "user": os.environ["POSTGRES_USER"],
+    "password": os.environ["POSTGRES_PASSWORD"],
+}
 
-def get_connection() -> sqlite3.Connection:
-    connection = sqlite3.connect(DATABASE_PATH)
-    connection.row_factory = sqlite3.Row
-    return connection
+def get_connection():
+    return psycopg2.connect(**DB_CONFIG, cursor_factory=psycopg2.extras.RealDictCursor)
+
 
 def create_database() -> None:
-    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-
-    with get_connection() as connection:
-        connection.execute(
+    with get_connection() as connection, connection.cursor() as cursor:
+        cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS people (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
                 surname TEXT NOT NULL,
                 date_of_birth TEXT NOT NULL,
                 swag_level INTEGER NOT NULL,
-                password_salt BLOB NOT NULL,
+                password_salt BYTEA NOT NULL,
                 password_hash TEXT NOT NULL
             )
             """
         )
+    connection.close()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -59,7 +63,7 @@ def calculate_age(date_of_birth: date) -> int:
         (today.month, today.day) < (date_of_birth.month, date_of_birth.day)
     )
 
-def person_from_row(row: sqlite3.Row) -> PersonOut:
+def person_from_row(row: psycopg2.extras.RealDictRow) -> PersonOut:
     date_of_birth = date.fromisoformat(row["date_of_birth"])
 
     return PersonOut(
@@ -80,24 +84,29 @@ async def create_person(person: PersonIn):
     salt = secrets.token_bytes(16)
     password_hash = hash_password(person.password, salt)
 
-    with get_connection() as connection:
-        cursor = connection.execute(
-            """
-            INSERT INTO people (
-                name, surname, date_of_birth, swag_level, password_salt, password_hash
+    connection = get_connection()
+    try:
+        with connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO people (
+                    name, surname, date_of_birth, swag_level, password_salt, password_hash
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (
+                    person.name,
+                    person.surname,
+                    person.date_of_birth.isoformat(),
+                    person.swag_level,
+                    salt,
+                    password_hash,
+                ),
             )
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                person.name,
-                person.surname,
-                person.date_of_birth.isoformat(),
-                person.swag_level,
-                salt,
-                password_hash,
-            ),
-        )
-        person_id = cursor.lastrowid
+            person_id = cursor.fetchone()["id"]
+    finally:
+        connection.close()
 
     return PersonOut(
         id=person_id,
@@ -110,15 +119,20 @@ async def create_person(person: PersonIn):
 
 @app.get("/people/{person_id}", response_model=PersonOut)
 async def get_person(person_id: int):
-    with get_connection() as connection:
-        row = connection.execute(
-            """
-            SELECT id, name, surname, date_of_birth, swag_level
-            FROM people
-            WHERE id = ?
-            """,
-            (person_id,),
-        ).fetchone()
+    connection = get_connection()
+    try:
+        with connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, name, surname, date_of_birth, swag_level
+                FROM people
+                WHERE id = %s
+                """,
+                (person_id,),
+            )
+            row = cursor.fetchone()
+    finally:
+        connection.close()
 
     if row is None:
         raise HTTPException(status_code=404, detail="Person not found")
@@ -127,34 +141,44 @@ async def get_person(person_id: int):
 
 @app.get("/people", response_model=list[PersonOut])
 async def list_people():
-    with get_connection() as connection:
-        rows = connection.execute(
-            """
-            SELECT id, name, surname, date_of_birth, swag_level
-            FROM people
-            ORDER BY id
-            """
-        ).fetchall()
+    connection = get_connection()
+    try:
+        with connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, name, surname, date_of_birth, swag_level
+                FROM people
+                ORDER BY id
+                """
+            )
+            rows = cursor.fetchall()
+    finally:
+        connection.close()
 
     return [person_from_row(row) for row in rows]
 
 @app.delete("/people/{person_id}")
 async def delete_person(person_id: int, payload: DeleteRequest):
-    with get_connection() as connection:
-        row = connection.execute(
-            "SELECT password_salt, password_hash FROM people WHERE id = ?",
-            (person_id,),
-        ).fetchone()
+    connection = get_connection()
+    try:
+        with connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT password_salt, password_hash FROM people WHERE id = %s",
+                (person_id,),
+            )
+            row = cursor.fetchone()
 
-        if row is None:
-            raise HTTPException(status_code=404, detail="Person not found")
+            if row is None:
+                raise HTTPException(status_code=404, detail="Person not found")
 
-        if not hmac.compare_digest(
-            hash_password(payload.password, row["password_salt"]),
-            row["password_hash"],
-        ):
-            raise HTTPException(status_code=403, detail="Incorrect password")
+            if not hmac.compare_digest(
+                hash_password(payload.password, bytes(row["password_salt"])),
+                row["password_hash"],
+            ):
+                raise HTTPException(status_code=403, detail="Incorrect password")
 
-        connection.execute("DELETE FROM people WHERE id = ?", (person_id,))
+            cursor.execute("DELETE FROM people WHERE id = %s", (person_id,))
+    finally:
+        connection.close()
 
     return {"detail": "Person removed"}

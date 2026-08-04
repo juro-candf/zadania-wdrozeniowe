@@ -22,6 +22,14 @@ FirstApplication/.venv/
 # Locally generated nginx TLS certificates
 FirstApplication/nginx/certs/
 
+# Local PostgreSQL data (if ever bind-mounted for local testing instead of
+# a named Docker volume / Kubernetes PersistentVolumeClaim)
+FirstApplication/postgres-data/
+pgdata/
+
+# psql/libpq credentials file (contains plaintext DB passwords)
+.pgpass
+
 # IDE / editor
 .vscode/*
 !.vscode/settings.json
@@ -30,12 +38,6 @@ FirstApplication/nginx/certs/
 # OS files
 .DS_Store
 Thumbs.db
-
-# Local SQLite database (backend DATABASE_PATH, defaults to data/app.db)
-*.db
-*.sqlite
-*.sqlite3
-data/
 
 # Testing / coverage
 .pytest_cache/
