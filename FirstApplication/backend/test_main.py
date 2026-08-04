@@ -1,11 +1,11 @@
 import os
-import tempfile
-from pathlib import Path
-
 import pytest
 
-_tmp_dir = tempfile.TemporaryDirectory()
-os.environ["DATABASE_PATH"] = str(Path(_tmp_dir.name) / "test.db")
+os.environ.setdefault("POSTGRES_HOST", "localhost")
+os.environ.setdefault("POSTGRES_PORT", "5432")
+os.environ.setdefault("POSTGRES_DB", "test_coolpeople")
+os.environ.setdefault("POSTGRES_USER", "testuser")
+os.environ.setdefault("POSTGRES_PASSWORD", "testpass")
 
 from fastapi.testclient import TestClient
 from main import app
