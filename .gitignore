@@ -20,11 +20,11 @@ FirstApplication/.venv/
 *.log
 
 # Locally generated nginx TLS certificates
-FirstApplication/nginx/certs/
+nginx/certs/
 
 # Local PostgreSQL data (if ever bind-mounted for local testing instead of
 # a named Docker volume / Kubernetes PersistentVolumeClaim)
-FirstApplication/postgres-data/
+postgres-data/
 pgdata/
 
 # psql/libpq credentials file (contains plaintext DB passwords)

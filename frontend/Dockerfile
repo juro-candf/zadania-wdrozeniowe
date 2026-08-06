@@ -1,6 +1,6 @@
 FROM dhi.io/python:3.14-debian13-dev AS builder
 WORKDIR /app
-COPY requirements.txt .
+COPY requirements/requirements.txt .
 RUN python -m venv /opt/venv
 RUN /opt/venv/bin/pip install --no-cache-dir --require-hashes -r requirements.txt
 
