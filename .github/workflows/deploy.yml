@@ -12,14 +12,12 @@ jobs:
         steps:
             - uses: actions/checkout@v7
             - name: env 4 docker compose
-              working-directory: FirstApplication
               run: |
                 echo "POSTGRES_USER=${{ vars.POSTGRES_USER }}" >> .env
                 echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
                 echo "POSTGRES_DB=${{ vars.POSTGRES_DB }}" >> .env
 
             - name: Deploy
-              working-directory: FirstApplication
               run: |
                 docker compose pull
                 docker compose up -d
