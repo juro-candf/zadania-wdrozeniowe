@@ -27,11 +27,9 @@ docker-compose.yml
 .DS_Store
 Thumbs.db
 
-# Tests / dev-only dependencies / docs / misc
+# Tests / docs / misc
 test_*.py
 *_test.py
-requirements-dev.in
-requirements-dev.txt
 *.md
 .pytest_cache/
 .coverage

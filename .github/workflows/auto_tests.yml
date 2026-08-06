@@ -37,13 +37,12 @@ jobs:
                 cache: pip
 
             - name: Install dependencies
-              working-directory: FirstApplication/backend
+              working-directory: backend
               run: |
                 pip install -r requirements.txt
-                pip install -r requirements-dev.txt
 
             - name: Run tests
-              working-directory: FirstApplication/backend
+              working-directory: backend
               env:
                 POSTGRES_HOST: localhost
                 POSTGRES_PORT: "5432"
@@ -57,4 +56,4 @@ jobs:
               if: always()
               run: |
                 echo "Test results:"
-                cat FirstApplication/backend/pytest_results.xml
+                cat backend/pytest_results.xml

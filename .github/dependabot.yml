@@ -16,19 +16,19 @@ registries:
 updates:
   # Backend Python dependencies
   - package-ecosystem: "pip"
-    directory: "/FirstApplication/backend"
+    directory: "/backend"
     schedule:
       interval: "daily"
 
   # Frontend Python dependencies
   - package-ecosystem: "pip"
-    directory: "/FirstApplication/frontend"
+    directory: "/frontend"
     schedule:
       interval: "daily"
 
   # Backend Docker image
   - package-ecosystem: "docker"
-    directory: "/FirstApplication/backend"
+    directory: "/backend"
     registries:
       - dhi-io
     schedule:
@@ -36,7 +36,7 @@ updates:
 
   # Frontend Docker image
   - package-ecosystem: "docker"
-    directory: "/FirstApplication/frontend"
+    directory: "/frontend"
     registries:
       - dhi-io
     schedule:
