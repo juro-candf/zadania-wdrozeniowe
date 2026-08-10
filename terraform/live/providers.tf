@@ -15,7 +15,7 @@ provider "azurerm" {
   # level; skip auto-registration and rely on the providers AKS needs
   # (Microsoft.ContainerService, Network, Compute, Storage, ...) already
   # being registered by default on the subscription.
-  resource_provider_registrations = "none"
+  skip_provider_registration = true
 }
 
 provider "kubernetes" {
