@@ -43,3 +43,14 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+*.auto.tfvars
+!terraform.tfvars.example
+crash.log
+crash.*.log
