@@ -1,11 +1,16 @@
 terraform {
   required_providers {
-    azurerm = { source = "hashicorp/azurerm", version = "~> 3.90" }
+      azurerm = { source = "hashicorp/azurerm", version = "~> 3.90" }
     random  = { source = "hashicorp/random", version = "~> 3.6" }
   }
 }
+
 provider "azurerm" {
   features {}
+
+  # This account can't register Resource Providers at the subscription
+  # level; skip auto-registration.
+  resource_provider_registrations = "none"
 }
 
 resource "azurerm_resource_group" "tfstate" {
