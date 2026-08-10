@@ -10,7 +10,7 @@ provider "azurerm" {
 
   # This account can't register Resource Providers at the subscription
   # level; skip auto-registration.
-  resource_provider_registrations = "none"
+  skip_provider_registration = true
 }
 
 resource "azurerm_resource_group" "tfstate" {
