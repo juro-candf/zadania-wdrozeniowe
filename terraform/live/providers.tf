@@ -10,6 +10,12 @@ terraform {
 
 provider "azurerm" {
   features {}
+
+  # This account can't register Resource Providers at the subscription
+  # level; skip auto-registration and rely on the providers AKS needs
+  # (Microsoft.ContainerService, Network, Compute, Storage, ...) already
+  # being registered by default on the subscription.
+  resource_provider_registrations = "none"
 }
 
 provider "kubernetes" {
