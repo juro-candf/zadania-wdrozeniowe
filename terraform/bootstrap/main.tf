@@ -1,53 +1,42 @@
-terraform {
-  required_providers {
-      azurerm = { source = "hashicorp/azurerm", version = "~> 3.90" }
-    random  = { source = "hashicorp/random", version = "~> 3.6" }
-  }
-}
-
-provider "azurerm" {
-  features {}
-
-  # This account can't register Resource Providers at the subscription
-  # level; skip auto-registration.
-  skip_provider_registration = true
-}
-
-resource "azurerm_resource_group" "tfstate" {
-  name     = "rg-tfstate"
-  location = "westeurope"
-}
-
-resource "azurerm_storage_account" "tfstate" {
-  name                     = "sttfstatezw${random_string.suffix.result}"
-  resource_group_name      = azurerm_resource_group.tfstate.name
-  location                 = azurerm_resource_group.tfstate.location
-  account_tier             = "Standard"
-  account_replication_type = "LRS"
-  min_tls_version          = "TLS1_2"
-  allow_nested_items_to_be_public = false
-}
-
-resource "azurerm_storage_container" "tfstate" {
-  name                  = "tfstate"
-  storage_account_name  = azurerm_storage_account.tfstate.name
-  container_access_type = "private"
-}
-
 resource "random_string" "suffix" {
-  length  = 6
+  length  = 5
   special = false
   upper   = false
 }
 
-output "resource_group_name" {
-  value = azurerm_resource_group.tfstate.name
+locals {
+  cluster_name = "aks-${var.prefix}-${random_string.suffix.result}"
+  dns_prefix   = "${var.prefix}-${random_string.suffix.result}"
 }
 
-output "storage_account_name" {
-  value = azurerm_storage_account.tfstate.name
+# sandbox identity only has rights on this pre-existing resource group, not the subscription
+data "azurerm_resource_group" "this" {
+  name = var.resource_group_name
 }
 
-output "container_name" {
-  value = azurerm_storage_container.tfstate.name
+resource "azurerm_kubernetes_cluster" "this" {
+  name                = local.cluster_name
+  location            = data.azurerm_resource_group.this.location
+  resource_group_name = data.azurerm_resource_group.this.name
+  dns_prefix          = local.dns_prefix
+  kubernetes_version  = var.kubernetes_version
+  sku_tier            = var.sku_tier
+  tags                = var.tags
+
+  default_node_pool {
+    name                 = "system"
+    vm_size              = var.node_vm_size
+    node_count           = var.enable_auto_scaling ? null : var.node_count
+    enable_auto_scaling = var.enable_auto_scaling
+    min_count            = var.enable_auto_scaling ? var.min_node_count : null
+    max_count            = var.enable_auto_scaling ? var.max_node_count : null
+  }
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  network_profile {
+    network_plugin = var.network_plugin
+  }
 }

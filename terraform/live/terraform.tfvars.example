@@ -1,0 +1,17 @@
+# Copy to terraform.tfvars and adjust for your sandbox subscription.
+
+subscription_id     = "00000000-0000-0000-0000-000000000000"
+resource_group_name = "my-existing-sandbox-rg"
+prefix              = "sandbox"
+
+kubernetes_version  = null # defaults to current AKS default version
+sku_tier            = "Free"
+node_count          = 1
+node_vm_size        = "Standard_B2s_v2"
+enable_auto_scaling = false
+network_plugin      = "kubenet"
+
+tags = {
+  environment = "sandbox"
+  managed_by  = "terraform"
+}
