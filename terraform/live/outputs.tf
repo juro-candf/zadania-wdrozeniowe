@@ -1,20 +1,21 @@
 output "resource_group_name" {
-  value = azurerm_resource_group.main.name
+  description = "Name of the resource group containing the AKS cluster."
+  value       = data.azurerm_resource_group.this.name
 }
 
-output "aks_cluster_name" {
-  value = azurerm_kubernetes_cluster.main.name
+output "cluster_name" {
+  description = "Name of the AKS cluster."
+  value       = azurerm_kubernetes_cluster.this.name
 }
 
 output "kube_config" {
-  value     = azurerm_kubernetes_cluster.main.kube_config_raw
-  sensitive = true
+  description = "Raw kubeconfig for the cluster. Marked sensitive; use `terraform output -raw kube_config > kubeconfig` to save it."
+  value       = azurerm_kubernetes_cluster.this.kube_config_raw
+  sensitive   = true
 }
 
-output "get_credentials_command" {
-  value = "az aks get-credentials --resource-group ${azurerm_kubernetes_cluster.main.resource_group_name} --name ${azurerm_kubernetes_cluster.main.name}"
-}
-
-output "kong_proxy_service_command" {
-  value = "kubectl get svc -n kong kong-kong-proxy"
+output "host" {
+  description = "Kubernetes API server endpoint."
+  value       = azurerm_kubernetes_cluster.this.kube_config[0].host
+  sensitive   = true
 }
