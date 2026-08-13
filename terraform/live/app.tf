@@ -36,6 +36,5 @@ resource "helm_release" "app" {
   depends_on = [
     kubernetes_secret.postgres_credentials,
     helm_release.kong,
-    kubernetes_manifest.kong_ingress_class,
   ]
 }

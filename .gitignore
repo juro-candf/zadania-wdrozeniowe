@@ -49,6 +49,8 @@ htmlcov/
 *.tfstate
 *.tfstate.*
 *.tfplan
+tfplan*
+apply-output.log
 terraform.tfvars
 *.auto.tfvars
 !terraform.tfvars.example
