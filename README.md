@@ -16,13 +16,14 @@ A small web app with a FastAPI backend and Streamlit frontend, deployed with ngi
 8. [Running locally](#running-locally)
 9. [Docker / Docker Compose](#docker--docker-compose)
 10. [Kubernetes (Docker Desktop)](#kubernetes-docker-desktop)
-11. [Health checks](#health-checks)
-12. [Reverse proxy and TLS (nginx)](#reverse-proxy-and-tls-nginx)
-13. [Deployment workflow](#deployment-workflow)
-14. [Image versioning policy](#image-versioning-policy)
-15. [Testing](#testing)
-16. [Continuous integration](#continuous-integration)
-17. [Repository structure](#repository-structure)
+11. [Kubernetes (Azure AKS + Kong Gateway, via Terraform)](#kubernetes-azure-aks--kong-gateway-via-terraform)
+12. [Health checks](#health-checks)
+13. [Reverse proxy and TLS (nginx)](#reverse-proxy-and-tls-nginx)
+14. [Deployment workflow](#deployment-workflow)
+15. [Image versioning policy](#image-versioning-policy)
+16. [Testing](#testing)
+17. [Continuous integration](#continuous-integration)
+18. [Repository structure](#repository-structure)
 
 ---
 
@@ -259,6 +260,139 @@ The Kubernetes and Docker Compose paths are independent — they use separate Po
 
 ---
 
+## Kubernetes (Azure AKS + Kong Gateway, via Terraform)
+
+Beyond the local Docker Desktop path above, the app can also be provisioned on a real **Azure Kubernetes Service (AKS)** cluster, fronted by **[Kong Gateway](https://konghq.com/products/kong-gateway)** as the ingress/API gateway, entirely from Terraform — see [terraform/live](terraform/live). `terraform/bootstrap` is an earlier, standalone AKS-only prototype (no Kong/app) kept for reference; it is **not** part of this flow — `terraform/live` is the source of truth.
+
+### What each file provisions
+
+| File | Provisions |
+|---|---|
+| [variables.tf](terraform/live/variables.tf) | All input variables (subscription/RG/location, AKS sizing, Postgres credentials, image tags) |
+| [providers.tf](terraform/live/providers.tf) | `azurerm` provider (subscription, RP-registration skipped for sandbox subscriptions) + `kubernetes`/`helm` providers, both authenticated via the AKS cluster's own `kube_config` |
+| [versions.tf](terraform/live/versions.tf) | Pinned provider versions: `azurerm`, `kubernetes`, `helm`, `time`, `random` |
+| [backend.tf](terraform/live/backend.tf) | Remote state backend (`azurerm`) — an Azure Storage Account + blob container holding `aks.tfstate` |
+| [aks.tf](terraform/live/aks.tf) | Looks up the **pre-existing** sandbox resource group (`data`, not `resource` — sandbox identities usually can't create resource groups) and creates the AKS cluster itself |
+| [kong.tf](terraform/live/kong.tf) | The `kong` namespace, the Kong Helm release (DB-less mode, `proxy.type=LoadBalancer`), and 4 declarative `KongPlugin`/`KongClusterPlugin` CRDs: `rate-limiting`, `cors`, `request-size-limiting`, `prometheus` |
+| [app.tf](terraform/live/app.tf) | The `postgres-credentials` Kubernetes `Secret` and the app's own Helm release ([terraform/helm/zw-app](terraform/helm/zw-app)), which deploys backend/frontend/postgres and an `Ingress` routed through Kong |
+| [outputs.tf](terraform/live/outputs.tf) | `resource_group_name`, `cluster_name`, `kube_config` (sensitive), `host` (sensitive) |
+
+### Prerequisites
+
+- An Azure subscription/sandbox with a resource group you already have write access to (most sandbox identities are scoped to one pre-existing resource group, not the whole subscription).
+- [Terraform](https://developer.hashicorp.com/terraform/downloads) ≥ 1.7.0, the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), and `kubectl`.
+- Logged in with `az login` and `az account set --subscription <id>`.
+
+### 1. Create the remote state storage account
+
+Terraform's own state can't live in the state it manages, so create the storage account once, manually, in your resource group:
+
+```powershell
+$storageAccount = "sttfstatezw$(Get-Random -Minimum 1000 -Maximum 9999)"
+
+az storage account create `
+  --name $storageAccount `
+  --resource-group "<your-resource-group>" `
+  --location "<your-region>" `
+  --sku Standard_LRS `
+  --kind StorageV2 `
+  --min-tls-version TLS1_2 `
+  --allow-blob-public-access false
+
+az storage container create --name tfstate --account-name $storageAccount --auth-mode login
+```
+
+Put the result into [backend.tf](terraform/live/backend.tf):
+
+```hcl
+terraform {
+  backend "azurerm" {
+    resource_group_name  = "<your-resource-group>"
+    storage_account_name = "<the-storage-account-from-above>"
+    container_name       = "tfstate"
+    key                  = "aks.tfstate"
+  }
+}
+```
+
+### 2. Configure variables
+
+Copy [terraform.tfvars.example](terraform/live/terraform.tfvars.example) to `terraform.tfvars` (git-ignored) and fill in your subscription ID, resource group name, region, cluster name, and image tags. Set the Postgres password via an environment variable instead of committing it:
+
+```powershell
+$env:TF_VAR_postgres_password = "<a-strong-password>"
+```
+
+### 3. Deploy (first-time, three-phase apply)
+
+`cd terraform/live`, then `terraform init`. On a **first-ever apply against an empty state**, the deploy has to happen in three phases, because of two Terraform/Kong-specific limitations documented inline in `kong.tf`:
+
+- The `kubernetes`/`helm` providers need the AKS cluster's `kube_config` to already be a *known* value — impossible if the cluster is being created in the same apply.
+- `kubernetes_manifest` (used for the Kong plugin CRDs) validates its resource kind against the cluster's live API **at plan time** — impossible if the CRD is created by the same apply (by `helm_release.kong`).
+
+**Phase 1 — cluster only:** temporarily rename `kong.tf`/`app.tf` out of the way, then:
+```powershell
+terraform plan -out=tfplan
+terraform apply tfplan
+```
+Rename them back afterwards.
+
+**Phase 2 — Kong + app, plugins deferred:** in `kong.tf`, comment out the 4 `kubernetes_manifest.plugin_*` resources (everything else in the file stays), then:
+```powershell
+terraform plan -out=tfplan
+terraform apply tfplan
+```
+Verify the CRDs landed: `kubectl get crd | Select-String kong` should list `kongplugins.configuration.konghq.com`, `kongclusterplugins.configuration.konghq.com`, etc.
+
+**Phase 3 — plugins:** uncomment the 4 `kubernetes_manifest.plugin_*` resources again, then:
+```powershell
+terraform plan -out=tfplan
+terraform apply tfplan
+```
+
+After this first deploy, the phased dance isn't needed again — future changes (image tags, plugin config, etc.) just need a normal `terraform plan`/`apply`.
+
+### 4. Point kubectl at the cluster
+
+```powershell
+az aks get-credentials --resource-group <your-resource-group> --name <your-cluster-name> --overwrite-existing
+```
+
+### 5. Verify
+
+```powershell
+kubectl get pods -n kong                 # kong-kong-... pod should be Running (2/2)
+kubectl get pods -n default              # backend, frontend, postgres-0 should all be Running
+kubectl get svc -n kong kong-kong-proxy  # note the EXTERNAL-IP
+kubectl get kongplugins -A
+kubectl get kongclusterplugins
+```
+
+### 6. Using the app
+
+Kong's `LoadBalancer` external IP is the single public entry point:
+
+- `http://<EXTERNAL-IP>/` — the Streamlit frontend
+- `http://<EXTERNAL-IP>/api/...` — the backend REST API (`konghq.com/strip-path` removes the `/api` prefix before forwarding), e.g. `/api/health`, `/api/people`, `/api/docs`
+
+Kong enforces, via the CRDs in `kong.tf`: a 60 requests/minute rate limit per client (`429 API rate limit exceeded` beyond that), a 10MB request body cap, and CORS headers; the `prometheus` plugin exposes metrics for scraping.
+
+### Tear down
+
+```powershell
+terraform destroy
+```
+This removes the AKS cluster and everything on it. The remote state storage account created in step 1 is **not** managed by Terraform and must be deleted separately (`az storage account delete`) if you no longer need it.
+
+### Known gotchas
+
+- **Sandbox RG can't be created by Terraform** — `aks.tf` uses a `data` source for the resource group, never a `resource`, since sandbox identities are typically scoped to one pre-existing resource group only.
+- **Kong's chart has two CRD-install paths** — Helm's built-in `crds/` folder (always applied, untracked by the release) and a Helm-tracked path gated by `ingressController.installCRDs`. Keeping that value `"false"` (as set in `kong.tf`) avoids an "invalid ownership metadata" conflict between the two.
+- **Orphaned CRDs from a failed install** can block a retry with the same ownership error — if you hit this, `kubectl delete crd -o name | Select-String konghq | ForEach-Object { kubectl delete $_ }` and retry.
+- **Never commit `terraform.tfvars`** or a real `postgres_password` — both are git-ignored; use `terraform.tfvars.example` as the template and `TF_VAR_postgres_password` for the secret.
+
+---
+
 ## Health checks
 
 Both application services expose a health endpoint and a matching Docker `HEALTHCHECK`, so Compose knows when they're actually ready to serve traffic rather than just "started":
@@ -408,4 +542,20 @@ frontend/
 └── requirements/
     ├── requirements.in
     └── requirements.txt
+terraform/                  # AKS + Kong Gateway deployment — see Kubernetes (Azure AKS + Kong Gateway, via Terraform)
+├── bootstrap/              # earlier standalone AKS-only prototype; not used by the current flow
+├── live/                   # source of truth: AKS cluster, Kong Helm release + plugin CRDs, app Helm release
+│   ├── variables.tf
+│   ├── providers.tf
+│   ├── versions.tf
+│   ├── backend.tf           # azurerm remote state config; local terraform.tfvars is git-ignored
+│   ├── aks.tf                # data "azurerm_resource_group" + azurerm_kubernetes_cluster
+│   ├── kong.tf                # kong namespace, helm_release.kong, KongPlugin/KongClusterPlugin CRDs
+│   ├── app.tf                 # postgres-credentials Secret + helm_release.app
+│   ├── outputs.tf
+│   └── terraform.tfvars.example
+└── helm/zw-app/             # app Helm chart deployed by terraform/live/app.tf (backend/frontend/postgres/ingress)
+    ├── Chart.yaml
+    ├── values.yaml
+    └── templates/
 ```
