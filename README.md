@@ -317,11 +317,15 @@ terraform {
 
 ### 2. Configure variables
 
-Copy [terraform.tfvars.example](terraform/live/terraform.tfvars.example) to `terraform.tfvars` (git-ignored) and fill in your subscription ID, resource group name, region, cluster name, and image tags. Set the Postgres password via an environment variable instead of committing it:
+Copy [terraform.tfvars.example](terraform/live/terraform.tfvars.example) to `terraform.tfvars` (git-ignored) and fill in `subscription_id`, `resource_group_name`, `location`, `cluster_name`, `postgres_user`, `postgres_db`, and `backend_image_tag`/`frontend_image_tag` — these have no defaults in [variables.tf](terraform/live/variables.tf) and `terraform plan` fails without them. Set the Postgres password via an environment variable instead of committing it:
 
 ```powershell
 $env:TF_VAR_postgres_password = "<a-strong-password>"
 ```
+
+> **`resource_group_name` must match in two places:** the one in `terraform.tfvars` (where the AKS cluster gets provisioned) and the one in `backend.tf` (where Terraform state lives) are independent settings that should normally point at the same sandbox RG. Sandbox resource groups are typically short-lived/rotating — if you get an `AuthorizationFailed`/`403` error on `data.azurerm_resource_group.main`, it usually means `terraform.tfvars` still has a stale RG name from a previous sandbox. Update it to match your current one, and re-run `terraform plan`.
+>
+> **Changing `backend.tf`** (e.g. pointing at a new storage account for a new sandbox) triggers a `Backend configuration changed` error on the next `terraform init`. If the old backend/storage account no longer exists (typical when a sandbox rotates), run `terraform init -reconfigure` to start from a clean state rather than `-migrate-state`.
 
 ### 3. Deploy (first-time, three-phase apply)
 
