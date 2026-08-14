@@ -1,8 +1,13 @@
 # Copy to terraform.tfvars and adjust for your sandbox subscription.
+# NOTE: resource_group_name here must match the one in backend.tf — sandbox
+# identities are typically scoped to a single, rotating resource group, so
+# both files need updating together whenever the sandbox changes.
 
 subscription_id     = "00000000-0000-0000-0000-000000000000"
 resource_group_name = "my-existing-sandbox-rg"
 prefix              = "sandbox"
+location            = "swedencentral"
+cluster_name        = "aks-zw-sandbox"
 
 kubernetes_version  = null # defaults to current AKS default version
 sku_tier            = "Free"
@@ -15,3 +20,12 @@ tags = {
   environment = "sandbox"
   managed_by  = "terraform"
 }
+
+# Postgres credentials used by the backend (postgres_password is better set
+# via $env:TF_VAR_postgres_password instead of committing it here).
+postgres_user   = "appuser"
+postgres_db     = "coolpeople"
+
+# Image tags to deploy (must already be published to the registry).
+backend_image_tag  = "latest"
+frontend_image_tag = "latest"
