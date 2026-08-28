@@ -117,3 +117,9 @@ variable "frontend_image_tag" {
   description = "Image tag to deploy for the frontend service."
   type        = string
 }
+
+variable "grafana_admin_password" {
+  description = "Admin password for the Grafana instance deployed by kube-prometheus-stack."
+  type        = string
+  sensitive   = true
+}

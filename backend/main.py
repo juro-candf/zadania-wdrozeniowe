@@ -7,6 +7,7 @@ import psycopg2.extras
 from contextlib import asynccontextmanager
 from datetime import date
 from fastapi import FastAPI, HTTPException
+from prometheus_fastapi_instrumentator import Instrumentator
 from models import PersonIn, PersonOut, DeleteRequest
 
 def get_db_config():
@@ -47,6 +48,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+Instrumentator().instrument(app).expose(app)
 
 #_db: dict[int, PersonOut] = {}
 #_credentials: dict[int, tuple[bytes, str]] = {}
