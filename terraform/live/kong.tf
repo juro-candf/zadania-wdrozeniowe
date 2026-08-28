@@ -37,6 +37,20 @@ resource "helm_release" "kong" {
     name  = "env.database"
     value = "off"
   }
+  
+  set {
+    name  = "admin.enabled"
+    value = "true"
+  }
+  set {
+    name  = "admin.http.enabled"
+    value = "true"
+  }
+
+  set {
+    name  = "ingressController.env.log_level"
+    value = "debug"
+  }
 }
 
 resource "time_sleep" "wait_for_kong_crds" {
@@ -58,7 +72,7 @@ resource "kubernetes_manifest" "plugin_rate_limiting" {
     }
     plugin = "rate-limiting"
     config = {
-      minute = 60
+      minute = 200
       policy = "local"
     }
   }
@@ -94,7 +108,7 @@ resource "kubernetes_manifest" "plugin_request_size_limiting" {
     }
     plugin = "request-size-limiting"
     config = {
-      allowed_payload_size = 10
+      allowed_payload_size = 50
     }
   }
   depends_on = [time_sleep.wait_for_kong_crds]

@@ -1,0 +1,98 @@
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: basic-health-alerts
+    folder: General
+    interval: 1m
+    rules:
+      - uid: backend-error-rate
+        title: Backend 5xx error rate high
+        condition: C
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: "Backend 5xx error rate above threshold" }
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: { from: 300, to: 0 }
+            model:
+              expr: sum(rate(http_requests_total{status=~"5.."}[5m]))
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [1] }
+              refId: C
+
+      - uid: pod-restarts-high
+        title: Pod restarts high (15m)
+        condition: C
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: "A pod restarted more than 3 times in 15m" }
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: { from: 900, to: 0 }
+            model:
+              expr: max(increase(kube_pod_container_status_restarts_total[15m])) by (pod)
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [3] }
+              refId: C
+
+      - uid: node-disk-usage-high
+        title: Node disk usage > 85%
+        condition: C
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "A node's disk usage is above 85%" }
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: { from: 300, to: 0 }
+            model:
+              expr: max(1 - (node_filesystem_avail_bytes{fstype!=""} / node_filesystem_size_bytes{fstype!=""})) by (instance)
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0.85] }
+              refId: C
+
+      - uid: deployment-zero-ready
+        title: Deployment has 0 ready replicas
+        condition: C
+        for: 5m
+        labels: { severity: critical }
+        annotations: { summary: "A deployment has 0 ready replicas" }
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: { from: 300, to: 0 }
+            model:
+              expr: min(kube_deployment_status_replicas_ready{namespace="default"}) by (deployment)
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+              refId: C

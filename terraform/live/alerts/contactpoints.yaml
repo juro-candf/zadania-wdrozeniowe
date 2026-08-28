@@ -1,0 +1,15 @@
+apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: placeholder-todo
+    receivers:
+      - uid: placeholder-todo-uid
+        type: webhook
+        settings:
+          url: https://example.com/todo-replace-with-real-webhook
+        disableResolveMessage: false
+
+policies:
+  - orgId: 1
+    receiver: placeholder-todo
+    group_by: ["grafana_folder", "alertname"]
