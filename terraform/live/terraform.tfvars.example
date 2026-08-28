@@ -29,3 +29,7 @@ postgres_db     = "coolpeople"
 # Image tags to deploy (must already be published to the registry).
 backend_image_tag  = "latest"
 frontend_image_tag = "latest"
+
+# Grafana admin/basic-auth password (better set via $env:TF_VAR_grafana_admin_password
+# instead of committing it here).
+grafana_admin_password = "changeme"

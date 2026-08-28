@@ -17,13 +17,14 @@ A small web app with a FastAPI backend and Streamlit frontend, deployed with ngi
 9. [Docker / Docker Compose](#docker--docker-compose)
 10. [Kubernetes (Docker Desktop)](#kubernetes-docker-desktop)
 11. [Kubernetes (Azure AKS + Kong Gateway, via Terraform)](#kubernetes-azure-aks--kong-gateway-via-terraform)
-12. [Health checks](#health-checks)
-13. [Reverse proxy and TLS (nginx)](#reverse-proxy-and-tls-nginx)
-14. [Deployment workflow](#deployment-workflow)
-15. [Image versioning policy](#image-versioning-policy)
-16. [Testing](#testing)
-17. [Continuous integration](#continuous-integration)
-18. [Repository structure](#repository-structure)
+12. [Monitoring and observability (Prometheus, Loki, Grafana)](#monitoring-and-observability-prometheus-loki-grafana)
+13. [Health checks](#health-checks)
+14. [Reverse proxy and TLS (nginx)](#reverse-proxy-and-tls-nginx)
+15. [Deployment workflow](#deployment-workflow)
+16. [Image versioning policy](#image-versioning-policy)
+17. [Testing](#testing)
+18. [Continuous integration](#continuous-integration)
+19. [Repository structure](#repository-structure)
 
 ---
 
@@ -273,8 +274,11 @@ Beyond the local Docker Desktop path above, the app can also be provisioned on a
 | [versions.tf](terraform/live/versions.tf) | Pinned provider versions: `azurerm`, `kubernetes`, `helm`, `time`, `random` |
 | [backend.tf](terraform/live/backend.tf) | Remote state backend (`azurerm`) — an Azure Storage Account + blob container holding `aks.tfstate` |
 | [aks.tf](terraform/live/aks.tf) | Looks up the **pre-existing** sandbox resource group (`data`, not `resource` — sandbox identities usually can't create resource groups) and creates the AKS cluster itself |
-| [kong.tf](terraform/live/kong.tf) | The `kong` namespace, the Kong Helm release (DB-less mode, `proxy.type=LoadBalancer`), and 4 declarative `KongPlugin`/`KongClusterPlugin` CRDs: `rate-limiting`, `cors`, `request-size-limiting`, `prometheus` |
+| [kong.tf](terraform/live/kong.tf) | The `kong` namespace and the Kong Helm release (DB-less mode, `proxy.type=LoadBalancer`) |
+| [kong-plugins.tf](terraform/live/kong-plugins.tf) | 4 declarative `KongPlugin`/`KongClusterPlugin` CRDs: `rate-limiting`, `cors`, `request-size-limiting`, `prometheus` — split from `kong.tf` because they depend on CRDs that `helm_release.kong` installs (see [Deploy](#3-deploy-first-time-phased-apply)) |
 | [app.tf](terraform/live/app.tf) | The `postgres-credentials` Kubernetes `Secret` and the app's own Helm release ([terraform/helm/zw-app](terraform/helm/zw-app)), which deploys backend/frontend/postgres and an `Ingress` routed through Kong |
+| [monitoring.tf](terraform/live/monitoring.tf) | `monitoring` namespace, `kube-prometheus-stack` + `loki-stack` Helm releases, Grafana dashboard/alert `ConfigMap`s ([dashboards](terraform/live/dashboards), [alerts](terraform/live/alerts)), and the Grafana `Ingress` + basic-auth `KongPlugin`/`KongConsumer` — see [Monitoring and observability](#monitoring-and-observability-prometheus-loki-grafana) |
+| [service-monitor.tf](terraform/live/service-monitor.tf) | The backend's `ServiceMonitor` CRD — split from `monitoring.tf` for the same CRD-ordering reason as `kong-plugins.tf` |
 | [outputs.tf](terraform/live/outputs.tf) | `resource_group_name`, `cluster_name`, `kube_config` (sensitive), `host` (sensitive) |
 
 ### Prerequisites
@@ -317,38 +321,51 @@ terraform {
 
 ### 2. Configure variables
 
-Copy [terraform.tfvars.example](terraform/live/terraform.tfvars.example) to `terraform.tfvars` (git-ignored) and fill in `subscription_id`, `resource_group_name`, `location`, `cluster_name`, `postgres_user`, `postgres_db`, and `backend_image_tag`/`frontend_image_tag` — these have no defaults in [variables.tf](terraform/live/variables.tf) and `terraform plan` fails without them. Set the Postgres password via an environment variable instead of committing it:
+Copy [terraform.tfvars.example](terraform/live/terraform.tfvars.example) to `terraform.tfvars` (git-ignored) and fill in `subscription_id`, `resource_group_name`, `location`, `cluster_name`, `postgres_user`, `postgres_db`, and `backend_image_tag`/`frontend_image_tag` — these have no defaults in [variables.tf](terraform/live/variables.tf) and `terraform plan` fails without them. Set the Postgres and Grafana passwords via environment variables instead of committing them:
 
 ```powershell
 $env:TF_VAR_postgres_password = "<a-strong-password>"
+$env:TF_VAR_grafana_admin_password = "<a-strong-password>"
 ```
 
 > **`resource_group_name` must match in two places:** the one in `terraform.tfvars` (where the AKS cluster gets provisioned) and the one in `backend.tf` (where Terraform state lives) are independent settings that should normally point at the same sandbox RG. Sandbox resource groups are typically short-lived/rotating — if you get an `AuthorizationFailed`/`403` error on `data.azurerm_resource_group.main`, it usually means `terraform.tfvars` still has a stale RG name from a previous sandbox. Update it to match your current one, and re-run `terraform plan`.
 >
 > **Changing `backend.tf`** (e.g. pointing at a new storage account for a new sandbox) triggers a `Backend configuration changed` error on the next `terraform init`. If the old backend/storage account no longer exists (typical when a sandbox rotates), run `terraform init -reconfigure` to start from a clean state rather than `-migrate-state`.
 
-### 3. Deploy (first-time, three-phase apply)
+### 3. Deploy (first-time, phased apply)
 
-`cd terraform/live`, then `terraform init`. On a **first-ever apply against an empty state**, the deploy has to happen in three phases, because of two Terraform/Kong-specific limitations documented inline in `kong.tf`:
+`cd terraform/live`, then `terraform init`. On a **first-ever apply against an empty state**, the deploy has to happen in phases, because of Terraform/Kong/Prometheus-specific limitations documented inline in `kong.tf`/`monitoring.tf`:
 
 - The `kubernetes`/`helm` providers need the AKS cluster's `kube_config` to already be a *known* value — impossible if the cluster is being created in the same apply.
-- `kubernetes_manifest` (used for the Kong plugin CRDs) validates its resource kind against the cluster's live API **at plan time** — impossible if the CRD is created by the same apply (by `helm_release.kong`).
+- `kubernetes_manifest` (used for the Kong plugin CRDs and the backend `ServiceMonitor`) validates its resource kind against the cluster's live API **at plan time** — impossible if the CRD is created by the same apply (by `helm_release.kong` / `helm_release.kube_prometheus_stack`).
 
-**Phase 1 — cluster only:** temporarily rename `kong.tf`/`app.tf` out of the way, then:
+**Phase 1 — cluster only:** temporarily rename `kong.tf`/`kong-plugins.tf`/`app.tf`/`monitoring.tf`/`service-monitor.tf` out of the way, then:
 ```powershell
 terraform plan -out=tfplan
 terraform apply tfplan
 ```
 Rename them back afterwards.
 
-**Phase 2 — Kong + app, plugins deferred:** in `kong.tf`, comment out the 4 `kubernetes_manifest.plugin_*` resources (everything else in the file stays), then:
+**Phase 2 — Kong + app, plugins/monitoring deferred:** rename `kong-plugins.tf`, `monitoring.tf`, and `service-monitor.tf` out of the way (everything else stays), then:
 ```powershell
 terraform plan -out=tfplan
 terraform apply tfplan
 ```
 Verify the CRDs landed: `kubectl get crd | Select-String kong` should list `kongplugins.configuration.konghq.com`, `kongclusterplugins.configuration.konghq.com`, etc.
 
-**Phase 3 — plugins:** uncomment the 4 `kubernetes_manifest.plugin_*` resources again, then:
+**Phase 3 — Kong plugins:** rename `kong-plugins.tf` back in (`monitoring.tf`/`service-monitor.tf` still deferred), then:
+```powershell
+terraform plan -out=tfplan
+terraform apply tfplan
+```
+
+**Phase 4 — monitoring stack:** rename `monitoring.tf` back in (`service-monitor.tf` still deferred — its `ServiceMonitor` CRD is only installed once `helm_release.kube_prometheus_stack` finishes in *this* apply), then:
+```powershell
+terraform plan -out=tfplan
+terraform apply tfplan
+```
+
+**Phase 5 — backend ServiceMonitor:** rename `service-monitor.tf` back in, then:
 ```powershell
 terraform plan -out=tfplan
 terraform apply tfplan
@@ -367,9 +384,11 @@ az aks get-credentials --resource-group <your-resource-group> --name <your-clust
 ```powershell
 kubectl get pods -n kong                 # kong-kong-... pod should be Running (2/2)
 kubectl get pods -n default              # backend, frontend, postgres-0 should all be Running
+kubectl get pods -n monitoring           # prometheus/grafana/loki/promtail pods should all be Running
 kubectl get svc -n kong kong-kong-proxy  # note the EXTERNAL-IP
 kubectl get kongplugins -A
 kubectl get kongclusterplugins
+kubectl get servicemonitors -n default   # backend ServiceMonitor
 ```
 
 ### 6. Using the app
@@ -378,8 +397,9 @@ Kong's `LoadBalancer` external IP is the single public entry point:
 
 - `http://<EXTERNAL-IP>/` — the Streamlit frontend
 - `http://<EXTERNAL-IP>/api/...` — the backend REST API (`konghq.com/strip-path` removes the `/api` prefix before forwarding), e.g. `/api/health`, `/api/people`, `/api/docs`
+- `http://<EXTERNAL-IP>/grafana` — Grafana, behind HTTP basic-auth (`admin` / `grafana_admin_password`) — see [Monitoring and observability](#monitoring-and-observability-prometheus-loki-grafana)
 
-Kong enforces, via the CRDs in `kong.tf`: a 60 requests/minute rate limit per client (`429 API rate limit exceeded` beyond that), a 10MB request body cap, and CORS headers; the `prometheus` plugin exposes metrics for scraping.
+Kong enforces, via the CRDs in `kong-plugins.tf`: a 200 requests/minute rate limit per client (`429 API rate limit exceeded` beyond that), a 50MB request body cap, and CORS headers; the `prometheus` plugin exposes metrics for scraping.
 
 ### Tear down
 
@@ -393,7 +413,34 @@ This removes the AKS cluster and everything on it. The remote state storage acco
 - **Sandbox RG can't be created by Terraform** — `aks.tf` uses a `data` source for the resource group, never a `resource`, since sandbox identities are typically scoped to one pre-existing resource group only.
 - **Kong's chart has two CRD-install paths** — Helm's built-in `crds/` folder (always applied, untracked by the release) and a Helm-tracked path gated by `ingressController.installCRDs`. Keeping that value `"false"` (as set in `kong.tf`) avoids an "invalid ownership metadata" conflict between the two.
 - **Orphaned CRDs from a failed install** can block a retry with the same ownership error — if you hit this, `kubectl delete crd -o name | Select-String konghq | ForEach-Object { kubectl delete $_ }` and retry.
-- **Never commit `terraform.tfvars`** or a real `postgres_password` — both are git-ignored; use `terraform.tfvars.example` as the template and `TF_VAR_postgres_password` for the secret.
+- **The backend `ServiceMonitor` (`service-monitor.tf`) needs the `kube-prometheus-stack`'s CRDs** — if you see `no matches for kind "ServiceMonitor" in group "monitoring.coreos.com"`, `monitoring.tf` hasn't finished applying yet; rename `service-monitor.tf` out, apply `monitoring.tf` first, then apply `service-monitor.tf` on its own (same reasoning as the Kong plugins phase).
+- **Never commit `terraform.tfvars`** or a real `postgres_password`/`grafana_admin_password` — both are git-ignored; use `terraform.tfvars.example` as the template and `TF_VAR_postgres_password`/`TF_VAR_grafana_admin_password` for the secrets.
+
+---
+
+## Monitoring and observability (Prometheus, Loki, Grafana)
+
+The AKS deployment ([terraform/live/monitoring.tf](terraform/live/monitoring.tf)) also provisions a full observability stack in its own `monitoring` namespace, reusing the same Kong gateway as the app:
+
+| Component | How it's installed | Purpose |
+|---|---|---|
+| **kube-prometheus-stack** (Prometheus + Grafana) | `helm_release.kube_prometheus_stack` (Alertmanager disabled — Grafana's own Unified Alerting is used instead) | Cluster/node/pod metrics via `node-exporter`/`kube-state-metrics`, scraped by Prometheus; Grafana as the dashboard/alerting UI |
+| **Loki + Promtail** | `helm_release.loki_stack` (`grafana.enabled = false`, reusing the Grafana above) | Aggregates pod logs, queryable from Grafana's Explore view |
+| **Backend metrics** | `prometheus-fastapi-instrumentator` in [backend/main.py](backend/main.py), scraped via the `kubernetes_manifest.backend_service_monitor` `ServiceMonitor` ([service-monitor.tf](terraform/live/service-monitor.tf)) | Exposes `/metrics` (request rate/latency/error-rate) on the backend `Service` |
+| **Kong `prometheus` plugin** | `kubernetes_manifest.plugin_prometheus` ([kong-plugins.tf](terraform/live/kong-plugins.tf)) | Exposes Kong's own gateway-level metrics |
+| **Dashboards** | `kubernetes_config_map.grafana_dashboard_backend`, labeled `grafana_dashboard: "1"` for Grafana's sidecar to auto-load ([dashboards/backend-overview.json](terraform/live/dashboards/backend-overview.json)) | Backend request rate / latency / 5xx error-rate panels, plus the chart's bundled Kubernetes/node dashboards |
+| **Alert rules** | `kubernetes_config_map.grafana_alert_rules`, labeled `grafana_alert: "1"` ([alerts/rules.yaml](terraform/live/alerts/rules.yaml), [alerts/contactpoints.yaml](terraform/live/alerts/contactpoints.yaml)) | Grafana-provisioned alert rules (e.g. backend 5xx rate) with a placeholder/no-op contact point — **TODO**: wire up a real Slack/email channel |
+
+Grafana is exposed through the same Kong `LoadBalancer` as the app, at `http://<EXTERNAL-IP>/grafana`, protected by HTTP basic-auth (`kubernetes_manifest.grafana_basic_auth_plugin` + `grafana_consumer`, credentials from the `grafana_admin_password` variable — username `admin`). Node sizing is intentionally left at the default `Standard_B2s_v2`; Prometheus/Loki/Grafana resource requests/limits and Prometheus's retention (`24h`) are trimmed down to fit, relying on the existing node-pool autoscaling (`max_node_count`) if pods are ever `Pending`.
+
+Verify with:
+
+```powershell
+kubectl get pods -n monitoring                # all Running
+kubectl top nodes; kubectl top pods -n monitoring
+kubectl get servicemonitors -n default        # backend target
+```
+Then open `http://<EXTERNAL-IP>/grafana`, log in with `admin`/`<grafana_admin_password>`, and check Explore (Prometheus + Loki data sources), the backend dashboard, and Alerting → alert rules.
 
 ---
 
@@ -546,16 +593,24 @@ frontend/
 └── requirements/
     ├── requirements.in
     └── requirements.txt
-terraform/                  # AKS + Kong Gateway deployment — see Kubernetes (Azure AKS + Kong Gateway, via Terraform)
+terraform/                  # AKS + Kong Gateway + monitoring deployment — see Kubernetes (Azure AKS + Kong Gateway, via Terraform)
 ├── bootstrap/              # earlier standalone AKS-only prototype; not used by the current flow
-├── live/                   # source of truth: AKS cluster, Kong Helm release + plugin CRDs, app Helm release
+├── live/                   # source of truth: AKS cluster, Kong, app, and monitoring stack
 │   ├── variables.tf
 │   ├── providers.tf
 │   ├── versions.tf
-│   ├── backend.tf           # azurerm remote state config; local terraform.tfvars is git-ignored
-│   ├── aks.tf                # data "azurerm_resource_group" + azurerm_kubernetes_cluster
-│   ├── kong.tf                # kong namespace, helm_release.kong, KongPlugin/KongClusterPlugin CRDs
-│   ├── app.tf                 # postgres-credentials Secret + helm_release.app
+│   ├── backend.tf              # azurerm remote state config; local terraform.tfvars is git-ignored
+│   ├── aks.tf                  # data "azurerm_resource_group" + azurerm_kubernetes_cluster
+│   ├── kong.tf                 # kong namespace + helm_release.kong
+│   ├── kong-plugins.tf         # KongPlugin/KongClusterPlugin CRDs (rate-limiting, cors, request-size-limiting, prometheus)
+│   ├── app.tf                  # postgres-credentials Secret + helm_release.app
+│   ├── monitoring.tf           # monitoring namespace, kube-prometheus-stack + loki-stack, Grafana dashboards/alerts/ingress/basic-auth
+│   ├── service-monitor.tf      # backend ServiceMonitor CRD (split out for CRD-ordering reasons, see README)
+│   ├── dashboards/
+│   │   └── backend-overview.json   # Grafana dashboard JSON, loaded via file() into a labeled ConfigMap
+│   ├── alerts/
+│   │   ├── rules.yaml              # Grafana-provisioned alert rule groups
+│   │   └── contactpoints.yaml      # placeholder/no-op contact point (TODO: real Slack/email channel)
 │   ├── outputs.tf
 │   └── terraform.tfvars.example
 └── helm/zw-app/             # app Helm chart deployed by terraform/live/app.tf (backend/frontend/postgres/ingress)
